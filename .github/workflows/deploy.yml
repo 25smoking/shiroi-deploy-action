@@ -9,21 +9,19 @@ on:
   repository_dispatch:
     types: [trigger-workflow]
 
-# 👇👇👇 env 必须顶格写，作为独立模块 👇👇👇
+# 👇 所有的环境变量都要写在这一个 env 下面 👇
 env:
+  # 你的 API 配置
   NEXT_PUBLIC_API_URL: https://api.s4u2self.cc/api/v2
   NEXT_PUBLIC_GATEWAY_URL: https://api.s4u2self.cc
-# 👆👆👆 插入结束 👆👆👆
-  repository_dispatch:
-    types: [trigger-workflow]
+  # 原来的配置 (必须保留，否则检测不到更新)
+  HASH_FILE: build_hash
 
 permissions: write-all
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-
-env:
-  HASH_FILE: build_hash
 
 jobs:
   prepare:
