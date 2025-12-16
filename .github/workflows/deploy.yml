@@ -18,8 +18,10 @@ concurrency:
 env:
   HASH_FILE: build_hash
   
-  # 👇 关键修改：只加这一行，告诉浏览器去哪拿数据
+  # 👇 浏览器用公网
   NEXT_PUBLIC_API_URL: https://api.s4u2self.cc/api/v2
+  # 👇 服务器用内网 (GitHub 打包时就会把它写进代码，部署后刚好能用！)
+  NEXT_PUBLIC_GATEWAY_URL: http://127.0.0.1:2333
 
 jobs:
   prepare:
@@ -49,7 +51,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: innei-dev/shiroi
-          token: ${{ secrets.GH_PAT }} # `GH_PAT` is a secret that contains your PAT
+          token: ${{ secrets.GH_PAT }}
           fetch-depth: 0
           lfs: true
 
@@ -85,7 +87,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: innei-dev/shiroi
-          token: ${{ secrets.GH_PAT }} # `GH_PAT` is a secret that contains your PAT
+          token: ${{ secrets.GH_PAT }}
           fetch-depth: 0
           lfs: true
 
@@ -105,11 +107,6 @@ jobs:
         run: |
           sh ./ci-release-build.sh
 
-      # - uses: actions/upload-artifact@v4
-      #   with:
-      #     name: dist
-      #     path: assets/release.zip
-      #     retention-days: 7
       - name: Cache Build Artifacts
         id: cache-primes
         uses: actions/cache/save@v4
@@ -131,11 +128,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     steps:
-      # - name: Download artifact
-      #   uses: actions/download-artifact@v4
-      #   with:
-      #     name: dist
-
       - name: Restore cached Build Artifacts
         id: cache-primes-restore
         uses: actions/cache/restore@v4
@@ -181,12 +173,9 @@ jobs:
             rm -rf $workdir/standalone/.env
             ln -s $HOME/shiro/.env $workdir/standalone/.env
             export NEXT_SHARP_PATH=$(npm root -g)/sharp
-            # copy workdir ecosystem.config.js to basedir if not exists
             if [ ! -f $basedir/ecosystem.config.js ]; then
               cp $workdir/standalone/ecosystem.config.js $basedir/ecosystem.config.js
             fi
-            # https://github.com/Unitech/pm2/issues/3054
-            # symlink workdir node entry file to basedir
             ln -sf $workdir/standalone/server.js $basedir/server.js
             mkdir -p $workdir/standalone/.next
             rm -rf $workdir/standalone/.next/cache
@@ -200,7 +189,6 @@ jobs:
       - name: After deploy script
         run: |
           hash=${{ needs.build.outputs.sha_short }}
-          # curl -X "POST" "https://mx.innei.in/api/v2/fn/shiro/new-version-hook" -H 'Content-Type: application/json' -d "{\"hash\": \"$hash\", \"key\": \"\"}"
           ${{ secrets.AFTER_DEPLOY_SCRIPT }}
   store:
     name: Store artifact commit version
@@ -210,9 +198,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          persist-credentials: false # otherwise, the token used is the GITHUB_TOKEN, instead of your personal token
-          fetch-depth: 0 # otherwise, you will failed to push refs to dest repo
-      # Get the commit version from the build job
+          persist-credentials: false
+          fetch-depth: 0
       - name: Use outputs from build
         env:
           SHA_SHORT: ${{ needs.build.outputs.sha_short }}
@@ -223,7 +210,6 @@ jobs:
       - name: Write hash to file
         env:
           SHA_SHORT: ${{ needs.build.outputs.sha_short }}
-
         run: echo $SHA_SHORT > ${{ env.HASH_FILE }}
       - name: Commit files
         run: |
