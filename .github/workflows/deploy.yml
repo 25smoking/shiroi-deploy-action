@@ -5,8 +5,15 @@ on:
     branches:
       - main
   schedule:
-     - cron: '0 3 * * *'
+    - cron: '0 3 * * *'
+  repository_dispatch:
+    types: [trigger-workflow]
 
+# 👇👇👇 env 必须顶格写，作为独立模块 👇👇👇
+env:
+  NEXT_PUBLIC_API_URL: https://api.s4u2self.cc/api/v2
+  NEXT_PUBLIC_GATEWAY_URL: https://api.s4u2self.cc
+# 👆👆👆 插入结束 👆👆👆
   repository_dispatch:
     types: [trigger-workflow]
 
