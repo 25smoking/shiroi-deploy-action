@@ -1,6 +1,7 @@
 name: Build and Deploy
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -9,29 +10,26 @@ on:
   repository_dispatch:
     types: [trigger-workflow]
 
-# 👇 所有的环境变量都要写在这一个 env 下面 👇
-env:
-  # 你的 API 配置
-  NEXT_PUBLIC_API_URL: https://api.s4u2self.cc/api/v2
-  NEXT_PUBLIC_GATEWAY_URL: https://api.s4u2self.cc
-  # 原来的配置 (必须保留，否则检测不到更新)
-  HASH_FILE: build_hash
-
 permissions: write-all
-
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  PNPM_VERSION: 9.x.x
+  HASH_FILE: build_hash
+  
+  # 👇 核心配置：API 内外分流 (必须保留，否则后端连不上)
+  NEXT_PUBLIC_API_URL: https://api.s4u2self.cc/api/v2
+  NEXT_PUBLIC_GATEWAY_URL: http://127.0.0.1:2333
 
 jobs:
   prepare:
     name: Prepare
     runs-on: ubuntu-latest
     if: ${{ github.event.head_commit.message != 'Update hash file' }}
-
     outputs:
       hash_content: ${{ steps.read_hash.outputs.hash_content }}
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -40,21 +38,21 @@ jobs:
         run: |
           content=$(cat ${{ env.HASH_FILE }}) || true
           echo "hash_content=$content" >> "$GITHUB_OUTPUT"
+
   check:
     name: Check Should Rebuild
     runs-on: ubuntu-latest
     needs: prepare
     outputs:
       canceled: ${{ steps.use_content.outputs.canceled }}
-
     steps:
       - uses: actions/checkout@v4
         with:
+          # 👇 拉取官方仓库
           repository: innei-dev/shiroi
-          token: ${{ secrets.GH_PAT }} # `GH_PAT` is a secret that contains your PAT
+          token: ${{ secrets.GH_PAT }}
           fetch-depth: 0
           lfs: true
-
       - name: Use content from prev job and compare
         id: use_content
         env:
@@ -64,6 +62,8 @@ jobs:
           current_hash=$(git rev-parse --short HEAD)
           echo "File Hash: $file_hash"
           echo "Current Git Hash: $current_hash"
+          
+          # 如果版本一致，停止构建 (调试时可注释掉下面 4 行强制构建)
           if [ "$file_hash" == "$current_hash" ]; then
             echo "Hashes match. Stopping workflow."
             echo "canceled=true" >> $GITHUB_OUTPUT
@@ -76,10 +76,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: check
     if: ${{needs.check.outputs.canceled != 'true'}}
-
     strategy:
       matrix:
-        node-version: [lts/*]
+        node-version: [20.x]
     outputs:
       sha_short: ${{ steps.store.outputs.sha_short }}
       branch: ${{ steps.store.outputs.branch }}
@@ -87,31 +86,31 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: innei-dev/shiroi
-          token: ${{ secrets.GH_PAT }} # `GH_PAT` is a secret that contains your PAT
+          token: ${{ secrets.GH_PAT }}
           fetch-depth: 0
           lfs: true
 
       - name: Checkout LFS objects
         run: git lfs checkout
       - uses: pnpm/action-setup@v2
-
+        with:
+          version: ${{ env.PNPM_VERSION }}
       - name: Use Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
           cache: 'pnpm'
       - uses: jongwooo/next-cache@v1
+      
       - name: Install dependencies
         run: pnpm install --no-frozen-lockfile
+
+      # ❌ 已删除：自动修改 next.config.mjs 的步骤
+
       - name: Build project
         run: |
           sh ./ci-release-build.sh
 
-      # - uses: actions/upload-artifact@v4
-      #   with:
-      #     name: dist
-      #     path: assets/release.zip
-      #     retention-days: 7
       - name: Cache Build Artifacts
         id: cache-primes
         uses: actions/cache/save@v4
@@ -133,11 +132,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     steps:
-      # - name: Download artifact
-      #   uses: actions/download-artifact@v4
-      #   with:
-      #     name: dist
-
       - name: Restore cached Build Artifacts
         id: cache-primes-restore
         uses: actions/cache/restore@v4
@@ -161,7 +155,6 @@ jobs:
 
       - name: Exec deploy script with SSH
         uses: appleboy/ssh-action@master
-
         with:
           command_timeout: 5m
           host: ${{ secrets.HOST }}
@@ -171,8 +164,13 @@ jobs:
           port: ${{ secrets.PORT }}
           script: |
             set -e
-            source $HOME/.bashrc
-            basedir=$HOME/shiro
+            export NVM_DIR=~/.nvm
+            source ~/.nvm/nvm.sh
+            source $HOME/.bashrc 
+            
+            # 👇 请确保这个路径是你服务器上的真实路径
+            basedir=$HOME/shiro  
+            
             workdir=$basedir/${{ github.run_number }}
             mkdir -p $workdir
             mkdir -p $basedir/.cache
@@ -180,30 +178,28 @@ jobs:
             rm -r /tmp/shiro
             cd $workdir
             unzip -qq -o $workdir/release.zip
+            
+            # 处理 .env 链接
             rm -rf $workdir/standalone/.env
-            ln -s $HOME/shiro/.env $workdir/standalone/.env
+            ln -s $basedir/.env $workdir/standalone/.env 
+            
             export NEXT_SHARP_PATH=$(npm root -g)/sharp
-            # copy workdir ecosystem.config.js to basedir if not exists
+            
             if [ ! -f $basedir/ecosystem.config.js ]; then
               cp $workdir/standalone/ecosystem.config.js $basedir/ecosystem.config.js
             fi
-            # https://github.com/Unitech/pm2/issues/3054
-            # symlink workdir node entry file to basedir
+            
             ln -sf $workdir/standalone/server.js $basedir/server.js
             mkdir -p $workdir/standalone/.next
             rm -rf $workdir/standalone/.next/cache
             ln -sf $basedir/.cache $workdir/standalone/.next/cache
+            
             cd $basedir
             pm2 reload ecosystem.config.js --update-env
             rm $workdir/release.zip
             pm2 save
             echo "Deployed successfully"
 
-      - name: After deploy script
-        run: |
-          hash=${{ needs.build.outputs.sha_short }}
-          # curl -X "POST" "https://mx.innei.in/api/v2/fn/shiro/new-version-hook" -H 'Content-Type: application/json' -d "{\"hash\": \"$hash\", \"key\": \"\"}"
-          ${{ secrets.AFTER_DEPLOY_SCRIPT }}
   store:
     name: Store artifact commit version
     runs-on: ubuntu-latest
@@ -212,9 +208,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          persist-credentials: false # otherwise, the token used is the GITHUB_TOKEN, instead of your personal token
-          fetch-depth: 0 # otherwise, you will failed to push refs to dest repo
-      # Get the commit version from the build job
+          persist-credentials: false 
+          fetch-depth: 0 
       - name: Use outputs from build
         env:
           SHA_SHORT: ${{ needs.build.outputs.sha_short }}
@@ -225,7 +220,6 @@ jobs:
       - name: Write hash to file
         env:
           SHA_SHORT: ${{ needs.build.outputs.sha_short }}
-
         run: echo $SHA_SHORT > ${{ env.HASH_FILE }}
       - name: Commit files
         run: |
