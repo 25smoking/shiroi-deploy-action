@@ -17,6 +17,9 @@ concurrency:
 
 env:
   HASH_FILE: build_hash
+  
+  # 👇 关键修改：只加这一行，告诉浏览器去哪拿数据
+  NEXT_PUBLIC_API_URL: https://api.s4u2self.cc/api/v2
 
 jobs:
   prepare:
@@ -64,7 +67,7 @@ jobs:
             echo "canceled=true" >> $GITHUB_OUTPUT
           else
             echo "Hashes do not match. Continuing workflow."
-          fi
+            fi
 
   build:
     name: Build artifact
