@@ -98,7 +98,12 @@ jobs:
       - uses: jongwooo/next-cache@v1
       - name: Install dependencies
         run: pnpm install
+      
+      # ⚠️ 核心修改：注入 API 环境变量
       - name: Build project
+        env:
+          NEXT_PUBLIC_API_URL: ${{ secrets.API_URL }}
+          NEXT_PUBLIC_GATEWAY_URL: ${{ secrets.GATEWAY_URL }}
         run: |
           sh ./ci-release-build.sh
 
