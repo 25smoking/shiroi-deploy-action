@@ -97,7 +97,7 @@ jobs:
           cache: 'pnpm'
       - uses: jongwooo/next-cache@v1
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --no-frozen-lockfile
       
       # ⚠️ 核心修改：注入 API 环境变量
       - name: Build project
